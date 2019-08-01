@@ -27,12 +27,6 @@ namespace LLVMJIT
 		llvm::Constant* defaultTableMaxElementIndex;
 		llvm::Constant* defaultMemoryBase;
 		llvm::Constant* defaultMemoryEndOffset;
-		
-		llvm::DIBuilder diBuilder;
-		llvm::DICompileUnit* diCompileUnit;
-		llvm::DIFile* diModuleScope;
-
-		llvm::DIType* diValueTypes[(Uptr)ValueType::num];
 
 		llvm::MDNode* likelyFalseBranchWeights;
 		llvm::MDNode* likelyTrueBranchWeights;
@@ -41,20 +35,7 @@ namespace LLVMJIT
 		: module(inModule)
 		, moduleInstance(inModuleInstance)
 		, llvmModule(new llvm::Module("",context))
-		, diBuilder(*llvmModule)
 		{
-			diModuleScope = diBuilder.createFile("unknown","unknown");
-			diCompileUnit = diBuilder.createCompileUnit(0xffff,diModuleScope,"WAVM",true,"",0);
-
-			diValueTypes[(Uptr)ValueType::any] = nullptr;
-			diValueTypes[(Uptr)ValueType::i32] = diBuilder.createBasicType("i32",32,llvm::dwarf::DW_ATE_signed);
-			diValueTypes[(Uptr)ValueType::i64] = diBuilder.createBasicType("i64",64,llvm::dwarf::DW_ATE_signed);
-			diValueTypes[(Uptr)ValueType::f32] = diBuilder.createBasicType("f32",32,llvm::dwarf::DW_ATE_float);
-			diValueTypes[(Uptr)ValueType::f64] = diBuilder.createBasicType("f64",64,llvm::dwarf::DW_ATE_float);
-			#if ENABLE_SIMD_PROTOTYPE
-			diValueTypes[(Uptr)ValueType::v128] = diBuilder.createBasicType("v128",128,llvm::dwarf::DW_ATE_signed);
-			#endif
-			
 			auto zeroAsMetadata = llvm::ConstantAsMetadata::get(emitLiteral(I32(0)));
 			auto i32MaxAsMetadata = llvm::ConstantAsMetadata::get(emitLiteral(I32(INT32_MAX)));
 			likelyFalseBranchWeights = llvm::MDTuple::getDistinct(context,{llvm::MDString::get(context,"branch_weights"),zeroAsMetadata,i32MaxAsMetadata});
@@ -130,7 +111,7 @@ namespace LLVMJIT
 		// Operand stack manipulation
 		llvm::Value* pop()
 		{
-			assert(stack.size() - (controlStack.size() ? controlStack.back().outerStackSize : 0) >= 1);
+			WAVM_ASSERT_THROW(stack.size() - (controlStack.size() ? controlStack.back().outerStackSize : 0) >= 1);
 			llvm::Value* result = stack.back();
 			stack.pop_back();
 			return result;
@@ -138,7 +119,7 @@ namespace LLVMJIT
 
 		void popMultiple(llvm::Value** outValues,Uptr num)
 		{
-			assert(stack.size() - (controlStack.size() ? controlStack.back().outerStackSize : 0) >= num);
+			WAVM_ASSERT_THROW(stack.size() - (controlStack.size() ? controlStack.back().outerStackSize : 0) >= num);
 			std::copy(stack.end() - num,stack.end(),outValues);
 			stack.resize(stack.size() - num);
 		}
@@ -303,9 +284,9 @@ namespace LLVMJIT
 		llvm::Value* emitRuntimeIntrinsic(const char* intrinsicName,const FunctionType* intrinsicType,const std::initializer_list<llvm::Value*>& args)
 		{
 			ObjectInstance* intrinsicObject = Intrinsics::find(intrinsicName,intrinsicType);
-			assert(intrinsicObject);
+			WAVM_ASSERT_THROW(intrinsicObject);
 			FunctionInstance* intrinsicFunction = asFunction(intrinsicObject);
-			assert(intrinsicFunction->type == intrinsicType);
+			WAVM_ASSERT_THROW(intrinsicFunction->type == intrinsicType);
 			auto intrinsicFunctionPointer = emitLiteralPointer(intrinsicFunction->nativeFunction,asLLVMType(intrinsicType)->getPointerTo());
 			return irBuilder.CreateCall(intrinsicFunctionPointer,llvm::ArrayRef<llvm::Value*>(args.begin(),args.end()));
 		}
@@ -409,7 +390,7 @@ namespace LLVMJIT
 		}
 		void else_(NoImm imm)
 		{
-			assert(controlStack.size());
+			WAVM_ASSERT_THROW(controlStack.size());
 			ControlContext& currentContext = controlStack.back();
 
 			if(currentContext.isReachable)
@@ -425,11 +406,11 @@ namespace LLVMJIT
 				// Branch to the control context's end.
 				irBuilder.CreateBr(currentContext.endBlock);
 			}
-			assert(stack.size() == currentContext.outerStackSize);
+			WAVM_ASSERT_THROW(stack.size() == currentContext.outerStackSize);
 
 			// Switch the IR emitter to the else block.
-			assert(currentContext.elseBlock);
-			assert(currentContext.type == ControlContext::Type::ifThen);
+			WAVM_ASSERT_THROW(currentContext.elseBlock);
+			WAVM_ASSERT_THROW(currentContext.type == ControlContext::Type::ifThen);
 			currentContext.elseBlock->moveAfter(irBuilder.GetInsertBlock());
 			irBuilder.SetInsertPoint(currentContext.elseBlock);
 
@@ -440,7 +421,7 @@ namespace LLVMJIT
 		}
 		void end(NoImm)
 		{
-			assert(controlStack.size());
+			WAVM_ASSERT_THROW(controlStack.size());
 			ControlContext& currentContext = controlStack.back();
 
 			if(currentContext.isReachable)
@@ -456,7 +437,7 @@ namespace LLVMJIT
 				// Branch to the control context's end.
 				irBuilder.CreateBr(currentContext.endBlock);
 			}
-			assert(stack.size() == currentContext.outerStackSize);
+			WAVM_ASSERT_THROW(stack.size() == currentContext.outerStackSize);
 
 			if(currentContext.elseBlock)
 			{
@@ -479,13 +460,13 @@ namespace LLVMJIT
 				{
 					// If there weren't any incoming values for the end PHI, remove it and push a dummy value.
 					currentContext.endPHI->eraseFromParent();
-					assert(currentContext.resultType != ResultType::none);
+					WAVM_ASSERT_THROW(currentContext.resultType != ResultType::none);
 					push(typedZeroConstants[(Uptr)asValueType(currentContext.resultType)]);
 				}
 			}
 
 			// Pop and branch targets introduced by this control context.
-			assert(currentContext.outerBranchTargetStackSize <= branchTargetStack.size());
+			WAVM_ASSERT_THROW(currentContext.outerBranchTargetStackSize <= branchTargetStack.size());
 			branchTargetStack.resize(currentContext.outerBranchTargetStackSize);
 
 			// Pop this control context.
@@ -498,7 +479,7 @@ namespace LLVMJIT
 		
 		BranchTarget& getBranchTargetByDepth(Uptr depth)
 		{
-			assert(depth < branchTargetStack.size());
+			WAVM_ASSERT_THROW(depth < branchTargetStack.size());
 			return branchTargetStack[branchTargetStack.size() - depth - 1];
 		}
 		
@@ -506,7 +487,7 @@ namespace LLVMJIT
 		void enterUnreachable()
 		{
 			// Unwind the operand stack to the outer control context.
-			assert(controlStack.back().outerStackSize <= stack.size());
+			WAVM_ASSERT_THROW(controlStack.back().outerStackSize <= stack.size());
 			stack.resize(controlStack.back().outerStackSize);
 
 			// Mark the current control context as unreachable: this will cause the outer loop to stop dispatching operators to us
@@ -570,7 +551,7 @@ namespace LLVMJIT
 			}
 
 			// Create a LLVM switch instruction.
-			assert(imm.branchTableIndex < functionDef.branchTables.size());
+			WAVM_ASSERT_THROW(imm.branchTableIndex < functionDef.branchTables.size());
 			const std::vector<U32>& targetDepths = functionDef.branchTables[imm.branchTableIndex];
 			auto llvmSwitch = irBuilder.CreateSwitch(index,defaultTarget.block,(unsigned int)targetDepths.size());
 
@@ -640,14 +621,14 @@ namespace LLVMJIT
 			const FunctionType* calleeType;
 			if(imm.functionIndex < moduleContext.importedFunctionPointers.size())
 			{
-				assert(imm.functionIndex < moduleContext.moduleInstance->functions.size());
+				WAVM_ASSERT_THROW(imm.functionIndex < moduleContext.moduleInstance->functions.size());
 				callee = moduleContext.importedFunctionPointers[imm.functionIndex];
 				calleeType = moduleContext.moduleInstance->functions[imm.functionIndex]->type;
 			}
 			else
 			{
 				const Uptr calleeIndex = imm.functionIndex - moduleContext.importedFunctionPointers.size();
-				assert(calleeIndex < moduleContext.functionDefs.size());
+				WAVM_ASSERT_THROW(calleeIndex < moduleContext.functionDefs.size());
 				callee = moduleContext.functionDefs[calleeIndex];
 				calleeType = module.types[module.functions.defs[calleeIndex].type.index];
 			}
@@ -664,7 +645,7 @@ namespace LLVMJIT
 		}
 		void call_indirect(CallIndirectImm imm)
 		{
-			assert(imm.type.index < module.types.size());
+			WAVM_ASSERT_THROW(imm.type.index < module.types.size());
 			
 			auto calleeType = module.types[imm.type.index];
 			auto functionPointerType = asLLVMType(calleeType)->getPointerTo()->getPointerTo();
@@ -714,30 +695,30 @@ namespace LLVMJIT
 
 		void get_local(GetOrSetVariableImm<false> imm)
 		{
-			assert(imm.variableIndex < localPointers.size());
+			WAVM_ASSERT_THROW(imm.variableIndex < localPointers.size());
 			push(irBuilder.CreateLoad(localPointers[imm.variableIndex]));
 		}
 		void set_local(GetOrSetVariableImm<false> imm)
 		{
-			assert(imm.variableIndex < localPointers.size());
+			WAVM_ASSERT_THROW(imm.variableIndex < localPointers.size());
 			auto value = irBuilder.CreateBitCast(pop(),localPointers[imm.variableIndex]->getType()->getPointerElementType());
 			irBuilder.CreateStore(value,localPointers[imm.variableIndex]);
 		}
 		void tee_local(GetOrSetVariableImm<false> imm)
 		{
-			assert(imm.variableIndex < localPointers.size());
+			WAVM_ASSERT_THROW(imm.variableIndex < localPointers.size());
 			auto value = irBuilder.CreateBitCast(getTopValue(),localPointers[imm.variableIndex]->getType()->getPointerElementType());
 			irBuilder.CreateStore(value,localPointers[imm.variableIndex]);
 		}
 		
 		void get_global(GetOrSetVariableImm<true> imm)
 		{
-			assert(imm.variableIndex < moduleContext.globalPointers.size());
+			WAVM_ASSERT_THROW(imm.variableIndex < moduleContext.globalPointers.size());
 			push(irBuilder.CreateLoad(moduleContext.globalPointers[imm.variableIndex]));
 		}
 		void set_global(GetOrSetVariableImm<true> imm)
 		{
-			assert(imm.variableIndex < moduleContext.globalPointers.size());
+			WAVM_ASSERT_THROW(imm.variableIndex < moduleContext.globalPointers.size());
 			auto value = irBuilder.CreateBitCast(pop(),moduleContext.globalPointers[imm.variableIndex]->getType()->getPointerElementType());
 			irBuilder.CreateStore(value,moduleContext.globalPointers[imm.variableIndex]);
 		}
@@ -1265,7 +1246,7 @@ namespace LLVMJIT
 
 		void launch_thread(LaunchThreadImm)
 		{
-			assert(moduleContext.moduleInstance->defaultTable);
+			WAVM_ASSERT_THROW(moduleContext.moduleInstance->defaultTable);
 			auto errorFunctionIndex = pop();
 			auto argument = pop();
 			auto functionIndex = pop();
@@ -1481,22 +1462,6 @@ namespace LLVMJIT
 
 	void EmitFunctionContext::emit()
 	{
-		// Create debug info for the function.
-		llvm::SmallVector<llvm::Metadata*,10> diFunctionParameterTypes;
-		for(auto parameterType : functionType->parameters) { diFunctionParameterTypes.push_back(moduleContext.diValueTypes[(Uptr)parameterType]); }
-		auto diFunctionType = moduleContext.diBuilder.createSubroutineType(moduleContext.diBuilder.getOrCreateTypeArray(diFunctionParameterTypes));
-		diFunction = moduleContext.diBuilder.createFunction(
-			moduleContext.diModuleScope,
-			functionInstance->debugName,
-			llvmFunction->getName(),
-			moduleContext.diModuleScope,
-			0,
-			diFunctionType,
-			false,
-			true,
-			0);
-		llvmFunction->setSubprogram(diFunction);
-
 		// Create the return basic block, and push the root control context for the function.
 		auto returnBlock = llvm::BasicBlock::Create(context,"return",llvmFunction);
 		auto returnPHI = createPHI(returnBlock,functionType->ret);
@@ -1544,10 +1509,8 @@ namespace LLVMJIT
 		OperatorDecoderStream decoder(functionDef.code);
 		UnreachableOpVisitor unreachableOpVisitor(*this);
 		OperatorPrinter operatorPrinter(module,functionDef);
-		Uptr opIndex = 0;
 		while(decoder && controlStack.size())
 		{
-			irBuilder.SetCurrentDebugLocation(llvm::DILocation::get(context,(unsigned int)opIndex++,0,diFunction));
 			if(ENABLE_LOGGING)
 			{
 				logOperator(decoder.decodeOpWithoutConsume(operatorPrinter));
@@ -1556,7 +1519,7 @@ namespace LLVMJIT
 			if(controlStack.back().isReachable) { decoder.decodeOp(*this); }
 			else { decoder.decodeOp(unreachableOpVisitor); }
 		};
-		assert(irBuilder.GetInsertBlock() == returnBlock);
+		WAVM_ASSERT_THROW(irBuilder.GetInsertBlock() == returnBlock);
 		
 		// If enabled, emit a call to the WAVM function enter hook (for debugging).
 		if(ENABLE_FUNCTION_ENTER_EXIT_HOOKS)
@@ -1624,9 +1587,6 @@ namespace LLVMJIT
 		// Compile each function in the module.
 		for(Uptr functionDefIndex = 0;functionDefIndex < module.functions.defs.size();++functionDefIndex)
 		{ EmitFunctionContext(*this,module,module.functions.defs[functionDefIndex],moduleInstance->functionDefs[functionDefIndex],functionDefs[functionDefIndex]).emit(); }
-		
-		// Finalize the debug info.
-		diBuilder.finalize();
 
 		Timing::logRatePerSecond("Emitted LLVM IR",emitTimer,(F64)llvmModule->size(),"functions");
 

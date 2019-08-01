@@ -1,6 +1,6 @@
 /**
  *  @file
- *  @copyright defined in eos/LICENSE.txt
+ *  @copyright defined in eos/LICENSE
  *
  * \warning This file is machine generated. DO NOT EDIT.  See config.hpp.in for changes.
  */
@@ -11,15 +11,7 @@
 
 namespace eosio { namespace nodeos { namespace config {
   constexpr uint64_t version = 0x${nodeos_BUILD_VERSION};
-
-  template<typename I>
-  std::string itoh(I n, size_t hlen = sizeof(I)<<1) {
-     static const char* digits = "0123456789abcdef";
-     std::string r(hlen, '0');
-     for(size_t i = 0, j = (hlen - 1) * 4 ; i < hlen; ++i, j -= 4)
-        r[i] = digits[(n>>j) & 0x0f];
-     return r;
-  }
+  const string node_executable_name = "${NODE_EXECUTABLE_NAME}";
 }}}
 
 #endif // CONFIG_HPP_IN
